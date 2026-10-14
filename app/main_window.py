@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import re
 import threading
+import time
 from pathlib import Path
 
 from PySide6.QtCore import QObject, QSettings, Qt, QTimer, QUrl, Signal
@@ -91,6 +92,8 @@ class MainWindow(QMainWindow):
         self.player.failed.connect(lambda m: self.toast.show_message(m, "error"))
         self.player.waveformReady.connect(self._on_waveform)
         self.clock = QTimer(self, interval=33, timeout=self._tick)  # проигрывание без видео
+        self.demo_timer = QTimer(self, interval=16, timeout=self._demo_tick)  # показ эффекта появления
+        self._demo = None
         self.snap_timer = QTimer(self, singleShot=True, interval=450, timeout=self._snapshot)
         self.save_timer = QTimer(self, singleShot=True, interval=1500, timeout=self._autosave)
 
@@ -397,6 +400,7 @@ class MainWindow(QMainWindow):
         self.ae_panel = AEPanel()
         self.style_panel.add_page("gear", "After Effects", self.ae_panel)
         self.style_panel.changed.connect(self._on_style_changed)
+        self.style_panel.animPreview.connect(self.play_anim_demo)
         self.ae_panel.changed.connect(self._on_ae_changed)
         scard.lay.addWidget(self.style_panel, 1)
         scard.setMinimumWidth(360)
@@ -730,7 +734,80 @@ class MainWindow(QMainWindow):
         self.redo_btn.setEnabled(self.hist_pos < len(self.history) - 1)
         self._refresh_preview()
 
+    # ------------------------------------------------------------ показ эффекта появления
+
+    def _demo_index(self) -> int:
+        lst = self.doc.subtitles
+        if self.style_target is not None and self._target_valid():
+            return self.style_target[1]
+        row = self.current_row()
+        if 0 <= row < len(lst):
+            return row
+        for i, s in enumerate(lst):
+            if s.start <= self.playhead < s.end:
+                return i
+        return 0 if lst else -1
+
+    def play_anim_demo(self):
+        """Проигрывает в превью появление и исчезновение субтитра (видео и курсор не двигаются)."""
+        i = self._demo_index()
+        sub = self.doc.subtitles[i] if i >= 0 else Subtitle(0.0, 2.5, "Пример субтитра")
+        style = self.style_panel.get_style() if self.style_target is None or self.style_target[0] == "sub" \
+            else self._base_style(i)
+        if style.anim_in == "none" and style.anim_out == "none":
+            self.toast.show_message("Выберите эффект появления или исчезновения", "info", 1500)
+            return
+        d_in, d_out = durations(style, sub.start, sub.end)
+        a, b = sub.start, sub.end
+        hold_in = min(a + d_in + 0.7, b - d_out)
+        segs = [(a - 0.3, hold_in)]
+        out_from = max(b - d_out - 0.5, hold_in)
+        if style.anim_out != "none":
+            if out_from > hold_in + 0.01:
+                segs.append((out_from, b + 0.25))  # середину длинного субтитра пропускаем
+            else:
+                segs[0] = (a - 0.3, b + 0.25)
+        self._demo = {"sub": sub, "style": style, "segs": segs, "seg": 0, "t": segs[0][0], "key": i}
+        self.demo_timer.start()
+        self._demo_last = time.perf_counter()
+        self._refresh_preview()
+
+    def _demo_tick(self):
+        d = self._demo
+        if d is None:
+            self.demo_timer.stop()
+            return
+        now = time.perf_counter()
+        d["t"] += now - self._demo_last
+        self._demo_last = now
+        if d["t"] >= d["segs"][d["seg"]][1]:
+            d["seg"] += 1
+            if d["seg"] >= len(d["segs"]):
+                self.stop_anim_demo()
+                return
+            d["t"] = d["segs"][d["seg"]][0]
+        self._refresh_preview()
+
+    def stop_anim_demo(self):
+        if self._demo is not None:
+            self._demo = None
+            self.demo_timer.stop()
+            self._refresh_preview()
+
+    def _demo_items(self) -> list:
+        d = self._demo
+        sub, style, t = d["sub"], d["style"], d["t"]
+        if not sub.start <= t < sub.end:
+            return []
+        return [PreviewItem(("subs", max(d["key"], 0)), style, sub.text, current_word(sub, t), False,
+                            sub.word_styles, set(), False, anim_state(style, sub.start, sub.end, t))]
+
     def _refresh_preview(self):
+        if self._demo is not None:
+            ae = self.ae_panel.get_settings()
+            self.preview.set_comp_size(ae.comp_width, ae.comp_height)
+            self.preview.set_items(self._demo_items())
+            return
         t = self.playhead
         sel = self.current_row()
         target = self.style_target
@@ -753,6 +830,9 @@ class MainWindow(QMainWindow):
     # ============================================================ время и проигрывание
 
     def _set_playhead(self, t: float, follow: bool = False):
+        if self._demo is not None and abs(t - self.playhead) > 1e-6:
+            self._demo = None
+            self.demo_timer.stop()
         self.playhead = max(t, 0.0)
         self.timeline.set_playhead(self.playhead, follow)
         self._refresh_preview()
@@ -763,6 +843,7 @@ class MainWindow(QMainWindow):
         self._set_playhead(t)
 
     def toggle_play(self):
+        self.stop_anim_demo()
         if self.player.has_media():
             self.player.player.setPlaybackRate(1.0)
             self.player.toggle()

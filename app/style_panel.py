@@ -1,7 +1,7 @@
 """Панели настроек: стиль текста (с разделами слева) и параметры After Effects."""
 from __future__ import annotations
 
-from PySide6.QtCore import QSize, Qt, Signal
+from PySide6.QtCore import QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QFont, QFontDatabase
 from PySide6.QtWidgets import (QButtonGroup, QComboBox, QDoubleSpinBox, QFileDialog, QFontComboBox, QFrame,
                                QGridLayout, QHBoxLayout, QLineEdit, QScrollArea, QSpinBox, QStackedWidget,
@@ -100,6 +100,7 @@ QListWidget::item:selected {{ background: {SURFACE_3}; color: {TEXT}; }}
 
 class StylePanel(QWidget):
     changed = Signal()
+    animPreview = Signal()  # показать эффект появления/исчезновения в превью
 
     PAGES = [("text", "Текст"), ("fill", "Заливка"), ("stroke", "Обводка"), ("glow", "Свечение"),
              ("shadow", "Тень"), ("box", "Плашка"), ("position", "Положение"), ("anim", "Анимация"),
@@ -288,11 +289,20 @@ class StylePanel(QWidget):
 
     def _build_anim(self):
         p = self._page()
+        demo = button("▶  Показать эффект", None, "Проиграть появление и исчезновение в превью. "
+                      "При смене эффекта он показывается сам", self.animPreview.emit)
+        p.add_row("Предпросмотр", demo)
         p.add_row("Появление", self._reg("anim_in", _combo(ANIM_IN)))
         p.add_row("Длительность", self._reg("anim_in_dur", SliderSpin(0, 10, 0.05, 2, " с", slider_max=2)))
         p.add_row("Исчезновение", self._reg("anim_out", _combo(ANIM_OUT)))
         p.add_row("Длительность", self._reg("anim_out_dur", SliderSpin(0, 10, 0.05, 2, " с", slider_max=2)))
         p.add_row("Дистанция сдвига", self._reg("slide_distance", SliderSpin(0, 1000, 5, 0, " px", slider_max=200)))
+        # смена эффекта — сразу показать его (с задержкой, чтобы не дёргать на каждом шаге ползунка)
+        self._demo_timer = QTimer(self, singleShot=True, interval=350, timeout=self.animPreview.emit)
+        for k in ("anim_in", "anim_in_dur", "anim_out", "anim_out_dur", "slide_distance"):
+            w = self.w[k]
+            sig = w.currentIndexChanged if isinstance(w, QComboBox) else w.valueChanged
+            sig.connect(lambda *_: None if self._loading else self._demo_timer.start())
         p.finish()
 
     def _build_highlight(self):
