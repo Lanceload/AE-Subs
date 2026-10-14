@@ -55,7 +55,7 @@ class _Bus(QObject):
     updateFound = Signal(dict)
     updateReady = Signal(object)
     updateFailed = Signal(str)
-    updateProgress = Signal(float)
+    updateProgress = Signal(object)  # (скачано, всего, скорость, источник)
 
 
 class MainWindow(QMainWindow):
@@ -1512,31 +1512,49 @@ class MainWindow(QMainWindow):
         if box.clickedButton() is not yes:
             self.settings.setValue("skip_version", info["version"])
             return
-        self._update_dialog = QProgressDialog("Загружаю обновление…", None, 0, 100, self)
-        self._update_dialog.setWindowTitle("Обновление")
-        self._update_dialog.setMinimumDuration(0)
-        self._update_dialog.show()
+        cancel = threading.Event()
+        self._update_dialog = dlg = QProgressDialog("Подключаюсь…", "Отмена", 0, 100, self)
+        dlg.setWindowTitle(f"Обновление до {info['version']}")
+        dlg.setMinimumWidth(420)
+        dlg.setMinimumDuration(0)
+        dlg.setAutoClose(False)
+        dlg.setAutoReset(False)
+        dlg.canceled.connect(cancel.set)
+        dlg.show()
 
         def work():
             try:
-                self.bus.updateReady.emit(updater.download(info, self.bus.updateProgress.emit))
+                self.bus.updateReady.emit(updater.download(info, self.bus.updateProgress.emit, cancel))
+            except updater.Cancelled:
+                self.bus.updateFailed.emit("")
             except Exception as e:  # noqa: BLE001
                 self.bus.updateFailed.emit(f"Не удалось загрузить обновление:\n{e}")
         threading.Thread(target=work, daemon=True).start()
 
-    def _on_update_progress(self, v: float):
+    def _on_update_progress(self, p):
         dlg = getattr(self, "_update_dialog", None)
-        if dlg is not None:
-            dlg.setValue(int(v * 100))
+        if dlg is None or dlg.wasCanceled():
+            return
+        done, total, speed, source = p
+        mb = 1048576
+        size = f"{done / mb:.0f} из {total / mb:.0f} МБ" if total else f"{done / mb:.0f} МБ"
+        speed_text = f"{speed / mb:.1f} МБ/с" if speed >= mb / 10 else f"{speed / 1024:.0f} КБ/с"
+        left = f" · осталось ~{(total - done) / max(speed, 1) / 60:.0f} мин" if total and speed else ""
+        dlg.setLabelText(f"Загружаю обновление ({source})\n{size} · {speed_text}{left}")
+        if total:
+            dlg.setValue(int(done / total * 100))
 
     def _on_update_failed(self, msg: str):
         dlg = getattr(self, "_update_dialog", None)
         if dlg is not None:
             dlg.close()
-        QMessageBox.warning(self, "Обновление", msg)
+            self._update_dialog = None
+        if msg:  # пустое сообщение — пользователь сам отменил загрузку
+            QMessageBox.warning(self, "Обновление", msg)
 
     def _on_update_ready(self, folder):
         self._update_dialog.close()
+        self._update_dialog = None
         try:
             updater.install_and_restart(Path(folder))
         except RuntimeError as e:

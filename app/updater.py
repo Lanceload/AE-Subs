@@ -1,6 +1,7 @@
 """Обновление программы из релизов GitHub.
 
 Каждый релиз репозитория — тег vX.Y.Z и архив AE_Subs_X.Y.Z.zip с содержимым папки программы.
+Тот же архив лежит на Hugging Face: у части провайдеров файлы GitHub качаются очень медленно.
 Модели, CUDA, пресеты и проекты при обновлении не трогаются.
 """
 from __future__ import annotations
@@ -11,6 +12,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import urllib.request
 import zipfile
 from pathlib import Path
@@ -21,6 +23,8 @@ from .version import VERSION
 REPO = "Lanceload/AE-Subs"
 RELEASES_URL = f"https://github.com/{REPO}/releases"
 API_LATEST = f"https://api.github.com/repos/{REPO}/releases/latest"
+HF_FILES = "https://huggingface.co/Yaqen/AE-Subs/resolve/main"  # копии архивов релизов
+SLOW_SPEED = 150 * 1024  # байт/с: медленнее — пробуем следующий источник
 KEEP_DIRS = ["models", "cuda", "presets", "projects"]
 _HEADERS = {"User-Agent": "AE-Subs-updater", "Accept": "application/vnd.github+json"}
 
@@ -54,21 +58,70 @@ def check() -> dict | None:
     return None
 
 
-def download(info: dict, progress=None) -> Path:
-    """Скачивает архив и распаковывает во временную папку. Возвращает папку с программой."""
-    work = Path(tempfile.gettempdir()) / "ae_subs_update"
-    shutil.rmtree(work, ignore_errors=True)
-    work.mkdir(parents=True)
-    archive = work / "update.zip"
-    req = urllib.request.Request(info["url"], headers={"User-Agent": "AE-Subs-updater"})
-    with urllib.request.urlopen(req, timeout=60) as r, open(archive, "wb") as f:
+class Cancelled(Exception):
+    pass
+
+
+def mirrors(info: dict) -> list[tuple[str, str]]:
+    """Откуда качать: Hugging Face (быстро и там, где GitHub замедляют), затем сам GitHub."""
+    name = f"AE_Subs_{info['version']}.zip"
+    out = [("Hugging Face", f"{HF_FILES}/{name}")]
+    if info.get("url"):
+        out.append(("GitHub", info["url"]))
+    return out
+
+
+def _fetch(url: str, archive: Path, info: dict, progress, cancel, allow_slow: bool, source: str):
+    """Качает файл. Если скорость слишком низкая и есть запасной источник — бросает TimeoutError."""
+    req = urllib.request.Request(url, headers={"User-Agent": "AE-Subs-updater"})
+    with urllib.request.urlopen(req, timeout=30) as r, open(archive, "wb") as f:
         total = int(r.headers.get("Content-Length", 0)) or info.get("size", 0)
-        done = 0
-        while chunk := r.read(1 << 20):
+        done, t0 = 0, time.monotonic()
+        while chunk := r.read(1 << 18):
+            if cancel is not None and cancel.is_set():
+                raise Cancelled()
             f.write(chunk)
             done += len(chunk)
-            if progress and total:
-                progress(min(done / total, 1.0))
+            elapsed = max(time.monotonic() - t0, 1e-3)
+            speed = done / elapsed
+            if progress:
+                progress(done, total, speed, source)
+            if not allow_slow and elapsed > 8 and speed < SLOW_SPEED:
+                raise TimeoutError(f"{source}: слишком медленно")
+    if total and archive.stat().st_size < total:
+        raise OSError("Загрузка прервалась.")
+
+
+def download(info: dict, progress=None, cancel=None) -> Path:
+    """Скачивает архив и распаковывает во временную папку. Возвращает папку с программой.
+
+    progress(скачано_байт, всего_байт, скорость_байт_в_сек, источник); cancel — threading.Event.
+    """
+    root = Path(tempfile.gettempdir()) / "ae_subs_update"
+    if root.is_dir():  # остатки прошлых попыток; занятые файлы просто пропускаем
+        for old in root.iterdir():
+            if old.is_dir():
+                shutil.rmtree(old, ignore_errors=True)
+                continue
+            try:
+                old.unlink(missing_ok=True)
+            except OSError:
+                pass
+    work = root / f"{info['version']}_{os.getpid()}_{int(time.time())}"
+    work.mkdir(parents=True)
+    archive = work / "update.zip"
+    sources = mirrors(info)
+    errors = []
+    for i, (source, url) in enumerate(sources):
+        try:
+            _fetch(url, archive, info, progress, cancel, allow_slow=i == len(sources) - 1, source=source)
+            break
+        except Cancelled:
+            raise
+        except (OSError, TimeoutError, ValueError) as e:  # urllib.error.* — наследники OSError
+            errors.append(f"{source}: {e}")
+    else:
+        raise RuntimeError("Не удалось скачать обновление.\n" + "\n".join(errors))
     out = work / "files"
     with zipfile.ZipFile(archive) as z:
         z.extractall(out)

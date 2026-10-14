@@ -24,6 +24,7 @@
 ## Установка
 
 1. Скачайте архив `AE_Subs_X.Y.Z.zip` со страницы [Releases](https://github.com/Lanceload/AE-Subs/releases)
+   (или с зеркала [Hugging Face](https://huggingface.co/Yaqen/AE-Subs/tree/main), если GitHub качает медленно)
    и распакуйте в любую папку.
 2. Запустите `AE Subs.exe`. Модель распознавания скачается при первом распознавании
    (в папку `models` рядом с программой).
@@ -41,7 +42,8 @@ python main.py
 
 Сборка exe: `build.bat` (PyInstaller) → папка `AE Subs`.
 Архив для релиза: `python tools\make_release.py` → `release\AE_Subs_X.Y.Z.zip`.
-Версия задаётся в `app/version.py`, релиз публикуется с тегом `vX.Y.Z`.
+Версия задаётся в `app/version.py`, релиз публикуется с тегом `vX.Y.Z`; тот же архив
+загружается в https://huggingface.co/Yaqen/AE-Subs — программа качает обновления сначала оттуда.
 
 ## Обратная связь
 
