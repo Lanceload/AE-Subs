@@ -1,0 +1,18 @@
+name = "aesubs-feedback"
+main = "src/index.js"
+compatibility_date = "2026-09-01"
+workers_dev = true
+
+# счётчики сообщений: 3 в минуту с одного адреса, 300 в сутки всего (src/index.js → Limiter)
+[[durable_objects.bindings]]
+name = "LIMITER"
+class_name = "Limiter"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Limiter"]
+
+# Секреты (задаются командой «npx wrangler secret put ИМЯ», в код не попадают):
+#   TG_TOKEN — токен бота от @BotFather
+#   OWNER_CHAT_ID — куда присылать отзывы
+#   WEBHOOK_SECRET — проверка, что запрос к /telegram пришёл от Telegram

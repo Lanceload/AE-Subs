@@ -1,0 +1,12 @@
+{
+  "name": "aesubs-feedback",
+  "private": true,
+  "type": "module",
+  "description": "Посредник: отзывы из AE Subs → Telegram-бот разработчика",
+  "scripts": {
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "wrangler": "^4.151.0"
+  }
+}

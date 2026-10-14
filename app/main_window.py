@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (QDialog, QDockWidget, QFileDialog, QFrame, QHBoxL
                                QMenu, QMessageBox, QProgressDialog, QStackedWidget, QTabBar, QVBoxLayout, QWidget)
 
 from . import ae_bridge, fonts, sharing, updater
-from .dialogs import ExportDialog, PasteTextDialog, TimingDialog, ValidationDialog
+from .dialogs import ExportDialog, FeedbackDialog, PasteTextDialog, TimingDialog, ValidationDialog
 from .gallery import StyleGallery, ensure_default_presets
 from .hotkeys import HotkeysDialog, keys_for
 from .jsx_builder import build_jsx, build_query_jsx, build_sync_jsx
@@ -294,6 +294,8 @@ class MainWindow(QMainWindow):
             act(m, "Сбросить расположение окон", self.reset_layout)
         elif key == "help":
             act(m, "Горячие клавиши", self.show_hotkeys, "help")
+            m.addSeparator()
+            act(m, "Обратная связь… (ошибка, идея, отзыв)", self.send_feedback)
             m.addSeparator()
             act(m, "Проверить обновления", lambda: self.check_updates(verbose=True))
             act(m, "Все версии на GitHub", self.open_github)
@@ -1541,6 +1543,11 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Обновление", str(e))
             return
         self.close()
+
+    def send_feedback(self):
+        dlg = FeedbackDialog(self.ae_panel.get_settings().afterfx_path, self)
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            self.toast.show_message("Спасибо! Сообщение отправлено разработчику")
 
     def open_github(self):
         QDesktopServices.openUrl(QUrl(updater.RELEASES_URL))

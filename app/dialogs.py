@@ -1,7 +1,10 @@
 """Диалоги: вставка текста, авто-тайминг, проверка перед отправкой, отдельное окно превью."""
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
+import threading
+import time
+
+from PySide6.QtCore import QObject, QSettings, Qt, Signal
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (QButtonGroup, QDialog, QHBoxLayout, QListWidget, QListWidgetItem,
                                QPlainTextEdit, QRadioButton, QVBoxLayout)
@@ -9,7 +12,8 @@ from PySide6.QtWidgets import (QButtonGroup, QDialog, QHBoxLayout, QListWidget, 
 from .models import Subtitle, auto_timing, split_plain_text
 from .preview import PreviewWidget
 from .style_panel import FormPage, _dspin
-from .theme import AMBER, RED, ToggleSwitch, button, dark_title_bar, label
+from . import feedback
+from .theme import AMBER, RED, Segmented, ToggleSwitch, button, dark_title_bar, label
 from .validation import Issue
 from .widgets import short_time
 
@@ -153,3 +157,84 @@ class ExportDialog(BaseDialog):
         self.page.refresh()
 
 
+
+
+class _FeedbackBus(QObject):
+    done = Signal(str)  # пустая строка — отправлено, иначе текст ошибки
+
+
+class FeedbackDialog(BaseDialog):
+    """Ошибка, предложение или отзыв — уходит разработчику (в Telegram через сервер-посредник)."""
+
+    PLACEHOLDERS = {
+        "bug": "Что случилось? Что вы делали перед этим и что ожидали увидеть?",
+        "idea": "Что добавить или изменить в программе?",
+        "review": "Что нравится, что мешает работать?",
+    }
+
+    def __init__(self, afterfx_path: str = "", parent=None):
+        super().__init__("Обратная связь", parent)
+        self.afterfx_path = afterfx_path
+        self.resize(560, 460)
+        self.lay.addWidget(label("Сообщение получит разработчик. Регистрация и контакты не нужны.", "muted"))
+        self.kind = Segmented([t for _, t in feedback.KINDS])
+        self.kind.currentChanged.connect(self._on_kind)
+        self.lay.addWidget(self.kind)
+        self.text = QPlainTextEdit()
+        self.text.textChanged.connect(self._on_text)
+        self.lay.addWidget(self.text, 1)
+        self.counter = label("", "small")
+        self.counter.setAlignment(Qt.AlignmentFlag.AlignRight)
+        self.lay.addWidget(self.counter)
+        self.attach = ToggleSwitch("Приложить сведения о системе (Windows, видеокарта, версия AE)")
+        self.attach.setChecked(True)
+        self.lay.addWidget(self.attach)
+        row = QHBoxLayout()
+        self.status = label("", "small")
+        row.addWidget(self.status, 1)
+        row.addWidget(button("Отмена", "ghost", slot=self.reject))
+        self.send_btn = button("Отправить", "primary", slot=self._send)
+        row.addWidget(self.send_btn)
+        self.lay.addLayout(row)
+        self.bus = _FeedbackBus(self)
+        self.bus.done.connect(self._on_done)
+        self._on_kind(0)
+        self._on_text()
+
+    def _kind(self) -> str:
+        return feedback.KINDS[self.kind.group.checkedId()][0]
+
+    def _on_kind(self, _i):
+        self.text.setPlaceholderText(self.PLACEHOLDERS[self._kind()])
+
+    def _on_text(self):
+        n = len(self.text.toPlainText())
+        self.counter.setText(f"{n} / {feedback.MAX_TEXT}")
+        self.send_btn.setEnabled(3 <= len(self.text.toPlainText().strip()) and n <= feedback.MAX_TEXT)
+
+    def _send(self):
+        last = QSettings().value("feedback_last", 0.0, float)
+        if time.time() - last < 30:
+            self.status.setText("Подождите полминуты перед следующим сообщением.")
+            return
+        self.send_btn.setEnabled(False)
+        self.text.setReadOnly(True)
+        self.status.setText("Отправляю…")
+        kind, text, attach = self._kind(), self.text.toPlainText().strip(), self.attach.isChecked()
+
+        def work():
+            try:
+                feedback.send(kind, text, feedback.system_info(self.afterfx_path) if attach else None)
+                self.bus.done.emit("")
+            except RuntimeError as e:
+                self.bus.done.emit(str(e))
+        threading.Thread(target=work, daemon=True).start()
+
+    def _on_done(self, error: str):
+        if error:
+            self.status.setText(f"⚠ {error}")
+            self.text.setReadOnly(False)
+            self._on_text()
+            return
+        QSettings().setValue("feedback_last", time.time())
+        self.accept()
