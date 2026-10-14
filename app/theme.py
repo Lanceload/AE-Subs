@@ -7,7 +7,8 @@ import sys
 
 from PySide6.QtCore import (QEasingCurve, QEvent, QObject, QPointF, QPropertyAnimation, QRectF, QSize, Qt, QTimer,
                             Signal)
-from PySide6.QtGui import QColor, QFont, QFontDatabase, QIcon, QLinearGradient, QPainter, QPainterPath, QPen
+from PySide6.QtGui import (QColor, QFont, QFontDatabase, QIcon, QLinearGradient, QPainter, QPainterPath, QPalette,
+                           QPen)
 from PySide6.QtWidgets import (QAbstractButton, QAbstractScrollArea, QAbstractSlider, QAbstractSpinBox, QApplication,
                                QButtonGroup, QScrollBar,
                                QCheckBox, QColorDialog, QComboBox, QDoubleSpinBox, QFrame, QGraphicsOpacityEffect,
@@ -128,7 +129,7 @@ QCheckBox::indicator {{ width: 16px; height: 16px; border-radius: 5px; border: 1
 QCheckBox::indicator:checked {{ background: {ACCENT}; border-color: {ACCENT}; }}
 QRadioButton {{ spacing: 8px; }}
 QSplitter::handle {{ background: transparent; }}
-QDockWidget {{ color: {MUTED}; font-size: 9pt; }}
+QDockWidget {{ color: {MUTED}; font-size: 9pt; background: {BG}; }}
 QDockWidget::title {{ background: {BG}; padding: 5px 10px; text-align: left; }}
 QDockWidget::close-button, QDockWidget::float-button {{ background: transparent; border: none; padding: 2px; }}
 QDockWidget::close-button:hover, QDockWidget::float-button:hover {{ background: {SURFACE_3}; border-radius: 4px; }}
@@ -169,25 +170,56 @@ def _chevron_path() -> str:
     return path.as_posix()
 
 
+def smooth_scroll(bar: QScrollBar, notches: float) -> bool:
+    """Плавно прокручивает полосу на notches щелчков колеса. False — прокручивать некуда."""
+    anim = bar.findChild(QPropertyAnimation, "smooth")
+    if anim is None:
+        anim = QPropertyAnimation(bar, b"value", bar)
+        anim.setObjectName("smooth")
+        anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+        anim.setDuration(240)
+    running = anim.state() == QPropertyAnimation.State.Running
+    base = anim.endValue() if running else bar.value()
+    step = max(bar.singleStep() * 3, 48) if bar.singleStep() > 1 else 3
+    target = min(max(int(round(base - notches * step)), bar.minimum()), bar.maximum())
+    if target == bar.value() and not running:
+        return False
+    anim.stop()
+    anim.setStartValue(bar.value())
+    anim.setEndValue(target)
+    anim.start()
+    return True
+
+
 class WheelGuard(QObject):
-    """Колёсико мыши не меняет значения ползунков, полей и списков — только прокручивает панель."""
+    """Колёсико мыши не меняет значения ползунков, полей и списков — только прокручивает панель, плавно."""
 
     def eventFilter(self, obj, event):
-        if event.type() == QEvent.Type.Wheel and isinstance(obj, (QAbstractSpinBox, QComboBox, QAbstractSlider)) \
-                and not isinstance(obj, QScrollBar):
+        if event.type() != QEvent.Type.Wheel:
+            return False
+        if isinstance(obj, (QAbstractSpinBox, QComboBox, QAbstractSlider)) and not isinstance(obj, QScrollBar):
             # прокручиваем панель, в которой лежит элемент (Qt сам не передаёт событие выше)
             w = obj.parentWidget()
             while w is not None and not isinstance(w, QAbstractScrollArea):
                 w = w.parentWidget()
             if w is not None:
-                bar = w.verticalScrollBar()
-                bar.setValue(bar.value() - event.angleDelta().y() // 120 * bar.singleStep() * 3)
+                smooth_scroll(w.verticalScrollBar(), event.angleDelta().y() / 120)
             return True
+        area = obj.parentWidget() if isinstance(obj, QWidget) else None
+        if (isinstance(area, QAbstractScrollArea) and obj is area.viewport()
+                and event.modifiers() == Qt.KeyboardModifier.NoModifier
+                and event.pixelDelta().isNull() and event.angleDelta().y() and not event.angleDelta().x()):
+            # обычное колесо мыши (тачпад и так плавный); если дальше некуда — отдаём событие наружу
+            return smooth_scroll(area.verticalScrollBar(), event.angleDelta().y() / 120)
         return False
 
 
 def apply_theme(app):
     app.setStyle("Fusion")
+    pal = app.palette()
+    pal.setColor(QPalette.ColorRole.Window, QColor(BG))  # фон под скруглёнными углами панелей
+    pal.setColor(QPalette.ColorRole.WindowText, QColor(TEXT))
+    app.setPalette(pal)
     font = QFont(ui_font_family(), 10)
     font.setHintingPreference(QFont.HintingPreference.PreferNoHinting)
     app.setFont(font)

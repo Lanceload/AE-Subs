@@ -152,6 +152,8 @@ class MainWindow(QMainWindow):
         # без названия: тонкая полоска для перетаскивания и крестик (как у панелей AE)
         d.setTitleBarWidget(PanelTitleBar(d))
         widget.setProperty("card", "dock")  # карточка продолжает полоску панели — одна цельная панель
+        widget.style().unpolish(widget)  # стиль уже применён как к обычной карточке — пересчитать
+        widget.style().polish(widget)
         self.addDockWidget(area, d)
         return d
 
@@ -1363,7 +1365,7 @@ class MainWindow(QMainWindow):
             self.ae_panel.set_settings(ae)
         name = comp["name"]
         path = self._comp_project_path(name)
-        if prev and prev != name and path.exists() and (self.project_path != path):
+        if path.exists() and self.project_path != path and ((prev and prev != name) or not self.doc.subtitles):
             if QMessageBox.question(self, "Проект композиции",
                                     f"Для композиции «{name}» есть сохранённый проект. Открыть его?\n"
                                     "(«Нет» — продолжить с текущими субтитрами)") == QMessageBox.StandardButton.Yes:
@@ -1533,7 +1535,10 @@ class MainWindow(QMainWindow):
         try:
             STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
             STATE_FILE.write_text(content, encoding="utf-8")
-            if self.doc.comp.get("name"):
+            if self.project_path is not None:
+                self.project_path.parent.mkdir(parents=True, exist_ok=True)
+                self.project_path.write_text(content, encoding="utf-8")
+            elif self.doc.comp.get("name"):
                 PROJECTS_DIR.mkdir(parents=True, exist_ok=True)
                 self._comp_project_path(self.doc.comp["name"]).write_text(content, encoding="utf-8")
         except OSError:
@@ -1567,11 +1572,11 @@ class MainWindow(QMainWindow):
         self._snapshot()
 
     def _load_state(self):
+        """Каждый запуск — новый проект. Из прошлого запуска берём только настройки."""
         try:
-            self._apply_doc(json.loads(STATE_FILE.read_text(encoding="utf-8")))
-            if self.doc.comp.get("name"):
-                self.project_path = self._comp_project_path(self.doc.comp["name"])
-        except (OSError, ValueError, TypeError, KeyError):
+            data = json.loads(STATE_FILE.read_text(encoding="utf-8"))
+            self._apply_doc({k: data[k] for k in ("ae", "style", "split", "recognize") if k in data})
+        except (OSError, ValueError, TypeError, KeyError, AttributeError):
             self._refresh_views()
             self._bind_style()
         geo = self.settings.value("geometry")
@@ -1643,6 +1648,19 @@ class MainWindow(QMainWindow):
         self.toast.show_message(f"Импортировано: {len(subs)}")
 
     def closeEvent(self, event):
+        if self.doc.subtitles and self.project_path is None and not self.doc.comp.get("name"):
+            ans = QMessageBox.question(
+                self, "Выход", "Сохранить субтитры в проект? При следующем запуске откроется новый проект.",
+                QMessageBox.StandardButton.Save | QMessageBox.StandardButton.Discard
+                | QMessageBox.StandardButton.Cancel)
+            if ans == QMessageBox.StandardButton.Cancel:
+                event.ignore()
+                return
+            if ans == QMessageBox.StandardButton.Save:
+                self.save_project()
+                if self.project_path is None:
+                    event.ignore()
+                    return
         self.save_timer.stop()
         self._autosave()
         if self.preview_full:
