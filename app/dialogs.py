@@ -168,15 +168,15 @@ class FeedbackDialog(BaseDialog):
 
     PLACEHOLDERS = {
         "bug": "Что случилось? Что вы делали перед этим и что ожидали увидеть?",
-        "idea": "Что добавить или изменить в программе?",
-        "review": "Что нравится, что мешает работать?",
+        "idea": "Например: «Хочу экспорт сразу в Premiere Pro» или «Добавьте эффект появления по слогам»",
+        "review": "Например: «Удобно, что субтитры сразу ложатся в композицию. Не хватает тёмной темы в превью»",
     }
 
     def __init__(self, afterfx_path: str = "", parent=None):
         super().__init__("Обратная связь", parent)
         self.afterfx_path = afterfx_path
         self.resize(560, 460)
-        self.lay.addWidget(label("Сообщение получит разработчик. Регистрация и контакты не нужны.", "muted"))
+        self.lay.addWidget(label("Сообщение получит разработчик.", "muted"))
         self.kind = Segmented([t for _, t in feedback.KINDS])
         self.kind.currentChanged.connect(self._on_kind)
         self.lay.addWidget(self.kind)

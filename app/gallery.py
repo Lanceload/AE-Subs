@@ -6,7 +6,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtGui import QIcon, QPixmap
-from PySide6.QtWidgets import QHBoxLayout, QMenu, QScrollArea, QToolButton, QWidget
+from PySide6.QtWidgets import QFrame, QGridLayout, QMenu, QScrollArea, QToolButton, QWidget
 
 from .models import Style
 from .paths import PRESETS_DIR
@@ -82,25 +82,50 @@ class StyleGallery(QScrollArea):
     exportRequested = Signal(str)
     deleted = Signal(str)
 
+    CARD_W, CARD_H, GAP = 116, 88, 8
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWidgetResizable(True)
-        self.setFixedHeight(100)
-        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.setFrameShape(QFrame.Shape.NoFrame)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.setMinimumHeight(self.CARD_H + 4)
         holder = QWidget()
-        self.row = QHBoxLayout(holder)
-        self.row.setContentsMargins(0, 0, 0, 0)
-        self.row.setSpacing(8)
+        # карточки идут строками сверху вниз; столбцов столько, сколько влезает по ширине
+        self.grid = QGridLayout(holder)
+        self.grid.setContentsMargins(0, 0, 0, 0)
+        self.grid.setSpacing(self.GAP)
+        self.grid.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
         self.setWidget(holder)
+        self.cards: list[QToolButton] = []
         self.buttons: dict[str, QToolButton] = {}
+        self._cols = 0
         self.reload()
+
+    def _columns(self) -> int:
+        w = self.viewport().width()
+        return max(1, (w + self.GAP) // (self.CARD_W + self.GAP))
+
+    def _layout_cards(self, force: bool = False):
+        cols = self._columns()
+        if cols == self._cols and not force:
+            return
+        self._cols = cols
+        for c in self.cards:
+            self.grid.removeWidget(c)
+        for i, c in enumerate(self.cards):
+            self.grid.addWidget(c, i // cols, i % cols)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._layout_cards()
 
     def _card(self, text: str, icon: QPixmap | None = None) -> QToolButton:
         b = QToolButton()
         b.setStyleSheet(CARD_QSS)
         b.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
         b.setIconSize(QSize(106, 60))
-        b.setFixedSize(116, 88)
+        b.setFixedSize(self.CARD_W, self.CARD_H)
         b.setCursor(Qt.CursorShape.PointingHandCursor)
         b.setText(text)
         if icon is not None:
@@ -108,15 +133,15 @@ class StyleGallery(QScrollArea):
         return b
 
     def reload(self, select: str | None = None):
-        while self.row.count():
-            it = self.row.takeAt(0)
-            if it.widget():
-                it.widget().deleteLater()
+        for c in self.cards:
+            self.grid.removeWidget(c)
+            c.deleteLater()
+        self.cards = []
         self.buttons = {}
         add = self._card("＋\nСохранить\nтекущий")
         add.setToolTip("Сохранить текущий стиль как пресет")
         add.clicked.connect(self.saveRequested.emit)
-        self.row.addWidget(add)
+        self.cards.append(add)
         for path in sorted(PRESETS_DIR.glob("*.json")) if PRESETS_DIR.is_dir() else []:
             try:
                 style = Style.from_dict(json.loads(path.read_text(encoding="utf-8")))
@@ -129,9 +154,9 @@ class StyleGallery(QScrollArea):
             b.clicked.connect(lambda _=False, s=style, n=path.stem: self._apply(s, n))
             b.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
             b.customContextMenuRequested.connect(lambda _pos, p=path, btn=b: self._menu(p, btn))
-            self.row.addWidget(b)
+            self.cards.append(b)
             self.buttons[path.stem] = b
-        self.row.addStretch()
+        self._layout_cards(force=True)
 
     def _apply(self, style: Style, name: str):
         for n, b in self.buttons.items():

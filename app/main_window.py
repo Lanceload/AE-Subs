@@ -7,8 +7,8 @@ import threading
 import time
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QSettings, Qt, QTimer, QUrl, Signal
-from PySide6.QtGui import QAction, QDesktopServices, QGuiApplication, QImage, QKeySequence, QShortcut
+from PySide6.QtCore import QObject, QSettings, Qt, QTimer, Signal
+from PySide6.QtGui import QAction, QGuiApplication, QImage, QKeySequence, QShortcut
 from PySide6.QtWidgets import (QDialog, QDockWidget, QFileDialog, QFrame, QHBoxLayout, QInputDialog, QMainWindow,
                                QMenu, QMessageBox, QProgressDialog, QStackedWidget, QTabBar, QVBoxLayout, QWidget)
 
@@ -295,10 +295,9 @@ class MainWindow(QMainWindow):
         elif key == "help":
             act(m, "Горячие клавиши", self.show_hotkeys, "help")
             m.addSeparator()
-            act(m, "Обратная связь… (ошибка, идея, отзыв)", self.send_feedback)
+            act(m, "Обратная связь", self.send_feedback)
             m.addSeparator()
             act(m, "Проверить обновления", lambda: self.check_updates(verbose=True))
-            act(m, "Все версии на GitHub", self.open_github)
             m.addSeparator()
             act(m, f"О программе (версия {VERSION})", self.about)
 
@@ -371,8 +370,7 @@ class MainWindow(QMainWindow):
         self.gallery.shareRequested.connect(self.share_style)
         self.gallery.exportRequested.connect(lambda n: self.export_styles([n]))
         self.gallery.deleted.connect(self._on_preset_deleted)
-        card.lay.addWidget(self.gallery)
-        card.lay.addStretch()
+        card.lay.addWidget(self.gallery, 1)
         return card
 
     def _build_style_column(self) -> QWidget:
@@ -1566,9 +1564,6 @@ class MainWindow(QMainWindow):
         dlg = FeedbackDialog(self.ae_panel.get_settings().afterfx_path, self)
         if dlg.exec() == QDialog.DialogCode.Accepted:
             self.toast.show_message("Спасибо! Сообщение отправлено разработчику")
-
-    def open_github(self):
-        QDesktopServices.openUrl(QUrl(updater.RELEASES_URL))
 
     def about(self):
         QMessageBox.about(self, "AE Subs",
