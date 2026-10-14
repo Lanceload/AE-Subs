@@ -1510,6 +1510,9 @@ class MainWindow(QMainWindow):
         if box.clickedButton() is not yes:
             self.settings.setValue("skip_version", info["version"])
             return
+        self._download_update(info)
+
+    def _download_update(self, info: dict):
         cancel = threading.Event()
         self._update_dialog = dlg = QProgressDialog("Подключаюсь…", "Отмена", 0, 100, self)
         dlg.setWindowTitle(f"Обновление до {info['version']}")
@@ -1522,7 +1525,9 @@ class MainWindow(QMainWindow):
 
         def work():
             try:
-                self.bus.updateReady.emit(updater.download(info, self.bus.updateProgress.emit, cancel))
+                # загрузчик передаёт 4 значения, сигнал везёт их одним кортежем
+                folder = updater.download(info, lambda *p: self.bus.updateProgress.emit(p), cancel)
+                self.bus.updateReady.emit(folder)
             except updater.Cancelled:
                 self.bus.updateFailed.emit("")
             except Exception as e:  # noqa: BLE001
@@ -1537,7 +1542,10 @@ class MainWindow(QMainWindow):
         mb = 1048576
         size = f"{done / mb:.0f} из {total / mb:.0f} МБ" if total else f"{done / mb:.0f} МБ"
         speed_text = f"{speed / mb:.1f} МБ/с" if speed >= mb / 10 else f"{speed / 1024:.0f} КБ/с"
-        left = f" · осталось ~{(total - done) / max(speed, 1) / 60:.0f} мин" if total and speed else ""
+        left = ""
+        if total and speed and done < total:
+            sec = (total - done) / speed
+            left = f" · осталось ~{sec / 60:.0f} мин" if sec >= 90 else f" · осталось ~{max(sec, 1):.0f} с"
         dlg.setLabelText(f"Загружаю обновление ({source})\n{size} · {speed_text}{left}")
         if total:
             dlg.setValue(int(done / total * 100))

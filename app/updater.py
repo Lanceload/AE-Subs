@@ -85,7 +85,10 @@ def _fetch(url: str, archive: Path, info: dict, progress, cancel, allow_slow: bo
             elapsed = max(time.monotonic() - t0, 1e-3)
             speed = done / elapsed
             if progress:
-                progress(done, total, speed, source)
+                try:
+                    progress(done, total, speed, source)
+                except Exception:  # noqa: BLE001 — ошибка показа прогресса не должна срывать загрузку
+                    progress = None
             if not allow_slow and elapsed > 8 and speed < SLOW_SPEED:
                 raise TimeoutError(f"{source}: слишком медленно")
     if total and archive.stat().st_size < total:
