@@ -1,0 +1,12 @@
+# собранная программа, модели, CUDA и проекты пользователя
+AE Subs/
+build/
+dist/
+release/
+*.spec
+
+__pycache__/
+*.pyc
+.venv/
+.vscode/
+.idea/
