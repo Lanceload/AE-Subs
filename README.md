@@ -23,13 +23,12 @@
 
 ## Установка
 
-1. Скачайте архив `AE_Subs_X.Y.Z.zip` со страницы [Releases](https://github.com/Lanceload/AE-Subs/releases)
-   (или с зеркала [Hugging Face](https://huggingface.co/Yaqen/AE-Subs/tree/main), если GitHub качает медленно)
-   и распакуйте в любую папку.
-2. Запустите `AE Subs.exe`. Модель распознавания скачается при первом распознавании
-   (в папку `models` рядом с программой).
-3. Для распознавания на видеокарте NVIDIA положите DLL CUDA 12 и cuDNN 9
-   (cublas, cudnn) в папку `cuda` рядом с программой. Без них распознавание идёт на процессоре.
+Скачайте установщик `AE_Subs_Setup_X.Y.Z.exe` со страницы [Releases](https://github.com/Lanceload/AE-Subs/releases)
+или с зеркала [Hugging Face](https://huggingface.co/Yaqen/AE-Subs/tree/main), если GitHub качает медленно.
+Во время установки можно сразу скачать модель распознавания (1,6 ГБ), ускорение на видеокарте NVIDIA
+(CUDA, 2 ГБ) и отделение голоса от музыки (67 МБ) — или позже, программа докачает нужное сама.
+
+Без установки: архив `AE_Subs_X.Y.Z.zip` — распаковать в любую папку и запустить `AE Subs.exe`.
 
 Нужен After Effects (проверено на AE 2025). Программа запускает скрипты через `AfterFX.exe -r`.
 
@@ -42,6 +41,7 @@ python main.py
 
 Сборка exe: `build.bat` (PyInstaller) → папка `AE Subs`.
 Архив для релиза: `python tools\make_release.py` → `release\AE_Subs_X.Y.Z.zip`.
+Установщик: `python tools\make_installer.py` (Inno Setup 6.5+) → `release\AE_Subs_Setup_X.Y.Z.exe`.
 Версия задаётся в `app/version.py`, релиз публикуется с тегом `vX.Y.Z`; тот же архив
 загружается в https://huggingface.co/Yaqen/AE-Subs — программа качает обновления сначала оттуда.
 

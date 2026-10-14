@@ -14,7 +14,10 @@ import numpy as np
 from .paths import MODELS_DIR
 
 MODEL_NAME = "Kim_Vocal_2.onnx"
-MODEL_URL = "https://github.com/TRvlvr/model_repo/releases/download/all_public_uvr_models/" + MODEL_NAME
+# сначала Hugging Face (у части провайдеров файлы GitHub качаются очень медленно), затем оригинал на GitHub
+MODEL_URLS = ["https://huggingface.co/seanghay/uvr_models/resolve/main/" + MODEL_NAME,
+              "https://github.com/TRvlvr/model_repo/releases/download/all_public_uvr_models/" + MODEL_NAME]
+MODEL_SIZE = 66_759_214
 MODEL_MB = 66
 SR = 44100
 N_FFT, HOP, DIM_F, DIM_T = 7680, 1024, 3072, 256
@@ -35,19 +38,28 @@ def download(progress=None):
     p = model_path()
     p.parent.mkdir(parents=True, exist_ok=True)
     tmp = p.with_suffix(".part")
-    req = urllib.request.Request(MODEL_URL, headers={"User-Agent": "Mozilla/5.0"})
-    with urllib.request.urlopen(req, timeout=60) as r, open(tmp, "wb") as f:
-        total = int(r.headers.get("Content-Length", 0)) or MODEL_MB * 1_000_000
-        done = 0
-        while True:
-            chunk = r.read(1 << 20)
-            if not chunk:
-                break
-            f.write(chunk)
-            done += len(chunk)
-            if progress:
-                progress(done / 1e6, total / 1e6)
-    os.replace(tmp, p)
+    error = None
+    for url in MODEL_URLS:
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+            with urllib.request.urlopen(req, timeout=60) as r, open(tmp, "wb") as f:
+                total = int(r.headers.get("Content-Length", 0)) or MODEL_SIZE
+                done = 0
+                while True:
+                    chunk = r.read(1 << 20)
+                    if not chunk:
+                        break
+                    f.write(chunk)
+                    done += len(chunk)
+                    if progress:
+                        progress(done / 1e6, total / 1e6)
+            if tmp.stat().st_size != MODEL_SIZE:
+                raise OSError("файл модели скачался не полностью")
+            os.replace(tmp, p)
+            return
+        except OSError as e:  # urllib.error.* — тоже OSError
+            error = e
+    raise error
 
 
 _WINDOW = np.hanning(N_FFT + 1)[:-1].astype(np.float32)  # периодическое окно Ханна, как torch.hann_window

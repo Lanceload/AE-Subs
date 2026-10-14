@@ -13,3 +13,5 @@ __pycache__/
 node_modules/
 .wrangler/
 .dev.vars
+installer/downloads.iss
+installer/*.bmp
